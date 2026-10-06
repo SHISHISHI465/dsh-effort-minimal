@@ -1,0 +1,21 @@
+# 依赖（含测试用的 jsdom + React，自行 npm install 还原）
+node_modules/
+
+# 本地配置、凭据和打包产物
+.env
+.env.*
+!.env.example
+.npmrc
+.dsh/
+*.pem
+*.key
+*.p12
+*.tgz
+
+# 系统 / 编辑器杂项
+.DS_Store
+Thumbs.db
+*.log
+
+# 官方样式对照导出：仅本地开发时用于比对官方类名与变量，不随仓库分发
+platform-css/

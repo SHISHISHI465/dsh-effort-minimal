@@ -1,0 +1,60 @@
+{
+  "name": "dsh-effort-minimal",
+  "version": "0.1.0",
+  "description": "DSH 极简推理档位控件：把「推理等级」做成输入框里的常驻细轨（档位点 + 滑块，最高档带粒子与爆炸），档位与配色全部走官方 API 与官方主题变量。",
+  "author": "SHISHISHI465",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SHISHISHI465/dsh-effort-minimal.git"
+  },
+  "homepage": "https://github.com/SHISHISHI465/dsh-effort-minimal#readme",
+  "bugs": {
+    "url": "https://github.com/SHISHISHI465/dsh-effort-minimal/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs",
+    "preview/panel-preview.png"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "effort",
+    "reasoning",
+    "reasoning-effort",
+    "ui"
+  ],
+  "engines": {
+    "dsh": ">=0.1.5-rc.2 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-model-selection"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}

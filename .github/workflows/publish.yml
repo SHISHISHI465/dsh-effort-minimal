@@ -1,0 +1,39 @@
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.1.1
+        required: true
+        type: string
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install a compatible npm CLI
+        run: npm install -g npm@latest
+      - name: Verify tag and package version
+        env:
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          test "$PUBLISH_TAG" = "v$VERSION"
+      - run: npm ci --prefix test
+      - run: node scripts/preflight.mjs
+      - run: npm test --prefix test
+      - run: npm pack --dry-run --json
+      - name: Publish with npm Trusted Publishing
+        run: npm publish --access public

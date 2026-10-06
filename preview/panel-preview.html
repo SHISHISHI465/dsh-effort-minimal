@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-effort-minimal 预览</title>
+<style>
+.esm-panel{box-sizing:border-box;width:100%;padding:16px 18px 18px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-elevation-prominent);user-select:none;-webkit-user-select:none}
+.esm-title{display:flex;align-items:center;justify-content:center;min-height:20px;font-size:13px;font-weight:600;line-height:18px;color:var(--esm-hue);transition:color .28s ease}
+.esm-model{text-align:center;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.esm-rail{position:relative;height:52px;margin-top:10px;cursor:pointer;touch-action:none}
+.esm-railTrack{position:absolute;left:14px;right:14px;top:50%;height:24px;margin-top:-12px}
+.esm-track{position:absolute;inset:0;border-radius:12px;background:var(--dsw-alias-border-l2)}
+.esm-fill{position:absolute;left:0;top:0;bottom:0;border-radius:12px;background:var(--esm-hue);overflow:hidden;transition:width var(--esm-move,.42s) cubic-bezier(.22,1,.36,1),background .28s ease}
+/* 拖动跟手：宽度零过渡；换档时用 --esm-move 的缓动（见下）。 */
+.esm-panel[data-dragging="true"] .esm-fill{transition:width 0s,background .28s ease}
+.esm-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.esm-dot{position:absolute;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:rgba(255,255,255,.62);pointer-events:none;transition:opacity .28s ease}
+.esm-dot[data-active="true"]{background:#fff}
+.esm-knob{position:absolute;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.05);transition:left var(--esm-move,.42s) cubic-bezier(.22,1,.36,1),box-shadow .28s ease,transform .16s ease;pointer-events:none}
+/* 拖动时圆点位置零过渡（否则跟不上指针）；只保留柔光与放大。 */
+.esm-panel[data-dragging="true"] .esm-knob{transition:left 0s,box-shadow .28s ease,transform .16s ease}
+.esm-panel[data-dragging="true"] .esm-knob{transform:scale(1.06)}
+.esm-panel[data-spark="true"] .esm-knob{box-shadow:0 1px 5px rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.05),0 0 18px 3px color-mix(in oklab, var(--esm-hue) 58%, transparent)}
+.esm-rail:hover .esm-knob{box-shadow:0 1px 6px rgba(0,0,0,.34),0 0 0 1px rgba(0,0,0,.05)}
+.esm-rail:focus-visible{outline:none}
+.esm-rail:focus-visible .esm-knob{box-shadow:0 0 0 3px var(--dsw-focus-ring-color,var(--esm-hue))}
+.esm-msg{text-align:center;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);margin-top:10px}
+.esm-error{color:var(--dsw-alias-state-error-primary)}
+.esm-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;max-width:150px;padding:0 8px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;cursor:pointer}
+.esm-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.esm-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}
+.esm-trigger:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--esm-hue))}
+.esm-triggerName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.esm-triggerLevel{color:var(--esm-hue);transition:color .28s ease;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+
+body{margin:0;padding:26px;background:var(--page-bg);font-family:-apple-system,"SF Pro Text","PingFang SC",sans-serif;color:var(--dsw-alias-label-primary)}
+h1{font-size:13px;font-weight:500;color:var(--dsw-alias-label-secondary);margin:0 0 16px}
+.theme{display:inline-block;vertical-align:top;margin:0 26px 26px 0}
+.theme > h2{font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary);margin:0 0 10px}
+.case{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-bottom:18px}
+.cap{font-size:10px;color:var(--dsw-alias-label-tertiary)}
+.composer{box-sizing:border-box;width:430px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-layer-2);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.composerInput{flex:1;min-width:120px;font-size:13px;color:var(--dsw-alias-label-caption)}
+.composerHint{font-size:10px;color:var(--dsw-alias-label-tertiary);margin:2px 0 4px}
+</style>
+</head>
+<body>
+<h1>dsh-effort-minimal · 常驻控件 + 滑轨面板（样式与 lib/client.js 同源）</h1>
+<section class="theme" style="--dsw-alias-bg-layer-2:#ffffff;--dsw-alias-border-l1:#e6e6e6;--dsw-alias-border-l2:#e3e3e5;--dsw-alias-label-primary:#1a1a1a;--dsw-alias-label-secondary:#4d4d4d;--dsw-alias-label-tertiary:#8c8c8c;--dsw-alias-label-caption:#9a9a9a;--dsw-alias-label-dimmed:#c2c2c2;--dsw-alias-interactive-bg-hover:rgba(0,0,0,.05);--dsw-alias-state-error-primary:#d92d20;--dsw-alias-brand-primary:#4d6bfe;--dsw-radius-md:10px;--dsw-radius-sm:6px;--dsw-elevation-prominent:0 8px 24px rgba(0,0,0,.12);--page-bg:#f6f7f9">
+		<h2>浅色（官方 Light）</h2>
+		<div class="case">
+			<span class="cap">输入框里的常驻控件（点它弹出面板）—— 只剩档位名，没有闪电 / 没有重置</span>
+			<div class="composer">
+				<span class="composerInput">输入消息…</span>
+				<button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">High</span>
+	</button>
+			</div>
+			<div class="composerHint">四个档位下的控件文字：</div>
+			<div class="composer">
+				<span class="composerInput">输入消息…</span>
+				<button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">Off</span>
+	</button><button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">Low</span>
+	</button><button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">High</span>
+	</button><button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">Max</span>
+	</button>
+			</div>
+			<div class="composerHint">无档位模型（控件禁用）：</div>
+			<div class="composer"><span class="composerInput">输入消息…</span><button type="button" class="esm-trigger" disabled>
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">—</span>
+	</button></div>
+		</div>
+		<div class="case"><span class="cap">档位 Off</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 217.0);--esm-spark:0;--esm-t:0.0000">
+	<div class="esm-title">Off</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0" aria-valuetext="Off">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:0.0000%;background:linear-gradient(90deg, oklch(0.62 0.19 217.0), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:0.0000%"></div>
+			<div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.42"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.42"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.42"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">档位 Low</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 229.0);--esm-spark:0;--esm-t:0.3333">
+	<div class="esm-title">Low</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="1" aria-valuetext="Low">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:33.3333%;background:linear-gradient(90deg, oklch(0.62 0.19 223.6), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:33.3333%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.4933333333333333"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.4933333333333333"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.4933333333333333"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">档位 High</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 248.0);--esm-spark:0;--esm-t:0.6667">
+	<div class="esm-title">High</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="2" aria-valuetext="High">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:66.6667%;background:linear-gradient(90deg, oklch(0.62 0.19 233.0), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:66.6667%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.5666666666666667"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">档位 Max</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="true" style="width:300px;--esm-hue:oklch(0.62 0.19 276.0);--esm-spark:1;--esm-t:1.0000">
+	<div class="esm-title">Max</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3" aria-valuetext="Max">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:100.0000%;background:linear-gradient(90deg, oklch(0.62 0.19 247.0), oklch(0.62 0.19 276.0))"><span style="position:absolute;left:6%;top:42%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.45"></span><span style="position:absolute;left:14%;top:62%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.60"></span><span style="position:absolute;left:23%;top:35%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.75"></span><span style="position:absolute;left:31%;top:58%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.90"></span><span style="position:absolute;left:39%;top:45%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.45"></span><span style="position:absolute;left:46%;top:66%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.60"></span><span style="position:absolute;left:54%;top:38%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.75"></span><span style="position:absolute;left:62%;top:55%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.90"></span><span style="position:absolute;left:70%;top:44%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.45"></span><span style="position:absolute;left:78%;top:60%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.60"></span><span style="position:absolute;left:86%;top:40%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.75"></span><span style="position:absolute;left:93%;top:52%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.90"></span></div>
+			<div class="esm-knob" style="left:100.0000%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">拖拽中（圆点随手移动）</span><div class="esm-panel" data-effort-panel="true" data-dragging="true" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 248.0);--esm-spark:0;--esm-t:0.6667">
+	<div class="esm-title">High</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="2" aria-valuetext="High">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:66.6667%;background:linear-gradient(90deg, oklch(0.62 0.19 233.0), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:66.6667%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.5666666666666667"></div>
+		</div>
+	</div>
+</div></div>
+	</section><section class="theme" style="--dsw-alias-bg-layer-2:#2b2b2e;--dsw-alias-border-l1:#3a3a3e;--dsw-alias-border-l2:#454549;--dsw-alias-label-primary:#f2f2f3;--dsw-alias-label-secondary:#c8c8cc;--dsw-alias-label-tertiary:#8f8f96;--dsw-alias-label-caption:#8a8a92;--dsw-alias-label-dimmed:#5c5c62;--dsw-alias-interactive-bg-hover:rgba(255,255,255,.08);--dsw-alias-state-error-primary:#ff6b6b;--dsw-alias-brand-primary:#6b83ff;--dsw-radius-md:10px;--dsw-radius-sm:6px;--dsw-elevation-prominent:0 8px 24px rgba(0,0,0,.45);--page-bg:#1c1c1f">
+		<h2>深色（官方 Dark）</h2>
+		<div class="case">
+			<span class="cap">输入框里的常驻控件（点它弹出面板）—— 只剩档位名，没有闪电 / 没有重置</span>
+			<div class="composer">
+				<span class="composerInput">输入消息…</span>
+				<button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">High</span>
+	</button>
+			</div>
+			<div class="composerHint">四个档位下的控件文字：</div>
+			<div class="composer">
+				<span class="composerInput">输入消息…</span>
+				<button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">Off</span>
+	</button><button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">Low</span>
+	</button><button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">High</span>
+	</button><button type="button" class="esm-trigger">
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">Max</span>
+	</button>
+			</div>
+			<div class="composerHint">无档位模型（控件禁用）：</div>
+			<div class="composer"><span class="composerInput">输入消息…</span><button type="button" class="esm-trigger" disabled>
+		<span class="esm-triggerName">推理等级</span>
+		<span class="esm-triggerLevel">—</span>
+	</button></div>
+		</div>
+		<div class="case"><span class="cap">档位 Off</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 217.0);--esm-spark:0;--esm-t:0.0000">
+	<div class="esm-title">Off</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0" aria-valuetext="Off">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:0.0000%;background:linear-gradient(90deg, oklch(0.62 0.19 217.0), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:0.0000%"></div>
+			<div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.42"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.42"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.42"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">档位 Low</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 229.0);--esm-spark:0;--esm-t:0.3333">
+	<div class="esm-title">Low</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="1" aria-valuetext="Low">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:33.3333%;background:linear-gradient(90deg, oklch(0.62 0.19 223.6), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:33.3333%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.4933333333333333"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.4933333333333333"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.4933333333333333"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">档位 High</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 248.0);--esm-spark:0;--esm-t:0.6667">
+	<div class="esm-title">High</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="2" aria-valuetext="High">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:66.6667%;background:linear-gradient(90deg, oklch(0.62 0.19 233.0), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:66.6667%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.5666666666666667"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">档位 Max</span><div class="esm-panel" data-effort-panel="true" data-dragging="false" data-spark="true" style="width:300px;--esm-hue:oklch(0.62 0.19 276.0);--esm-spark:1;--esm-t:1.0000">
+	<div class="esm-title">Max</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3" aria-valuetext="Max">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:100.0000%;background:linear-gradient(90deg, oklch(0.62 0.19 247.0), oklch(0.62 0.19 276.0))"><span style="position:absolute;left:6%;top:42%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.45"></span><span style="position:absolute;left:14%;top:62%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.60"></span><span style="position:absolute;left:23%;top:35%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.75"></span><span style="position:absolute;left:31%;top:58%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.90"></span><span style="position:absolute;left:39%;top:45%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.45"></span><span style="position:absolute;left:46%;top:66%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.60"></span><span style="position:absolute;left:54%;top:38%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.75"></span><span style="position:absolute;left:62%;top:55%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.90"></span><span style="position:absolute;left:70%;top:44%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.45"></span><span style="position:absolute;left:78%;top:60%;width:1.0px;height:1.0px;border-radius:50%;background:#fff;opacity:0.60"></span><span style="position:absolute;left:86%;top:40%;width:1.7px;height:1.7px;border-radius:50%;background:#fff;opacity:0.75"></span><span style="position:absolute;left:93%;top:52%;width:2.4px;height:2.4px;border-radius:50%;background:#fff;opacity:0.90"></span></div>
+			<div class="esm-knob" style="left:100.0000%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0"></div>
+		</div>
+	</div>
+</div></div><div class="case"><span class="cap">拖拽中（圆点随手移动）</span><div class="esm-panel" data-effort-panel="true" data-dragging="true" data-spark="false" style="width:300px;--esm-hue:oklch(0.62 0.19 248.0);--esm-spark:0;--esm-t:0.6667">
+	<div class="esm-title">High</div>
+	<div class="esm-model">deepseek-flash</div>
+	<div class="esm-rail" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="3" aria-valuenow="2" aria-valuetext="High">
+		<div class="esm-railTrack">
+			<div class="esm-track"></div>
+			<div class="esm-fill" style="width:66.6667%;background:linear-gradient(90deg, oklch(0.62 0.19 233.0), oklch(0.62 0.19 274.0))"></div>
+			<div class="esm-knob" style="left:66.6667%"></div>
+			<div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.000000);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 0.333333);opacity:0.5666666666666667"></div><div class="esm-dot" data-active="true" style="left:calc(12px + (100% - 24px) * 0.666667);opacity:0.9"></div><div class="esm-dot" data-active="false" style="left:calc(12px + (100% - 24px) * 1.000000);opacity:0.5666666666666667"></div>
+		</div>
+	</div>
+</div></div>
+	</section>
+</body>
+</html>

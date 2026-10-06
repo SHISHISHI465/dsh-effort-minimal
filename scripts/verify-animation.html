@@ -1,0 +1,399 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<style>
+body{margin:0;background:#1c1c1f;height:100vh}
+/* 触发器固定在视口底部 —— 与真实 composer 一样，浮层向上生长时才会落在视口内。
+   放在文档顶部会让浮层长到屏幕外，画布随之不可读（踩过）。 */
+#host{position:fixed;left:24px;right:24px;bottom:24px;display:flex;justify-content:flex-end}
+</style>
+</head><body><div id="host"></div>
+<script>
+const EFFORTS = [
+  { id: 'off', name: 'Off' }, { id: 'low', name: 'Low' },
+  { id: 'high', name: 'High' }, { id: 'max', name: 'Max' }
+];
+let snapshot = {
+  current: { provider: 'p', model: 'm', reasoningEffort: 'high' },
+  groups: [{ id: 'p', models: [
+    { id: 'm', name: 'deepseek-flash', reasoning: { efforts: EFFORTS, defaultEffort: 'high' } },
+    { id: 'm2', name: 'deepseek-reasoner', reasoning: { efforts: EFFORTS, defaultEffort: 'high' } }
+  ] }],
+  status: 'ready', failures: [], pending: null, error: null
+};
+const subscribers = new Set();
+const notify = () => { for (const fn of subscribers) fn(); };
+const directory = {
+  subscribe: (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); },
+  getSnapshot: () => snapshot
+};
+const select = (selection) => {
+  snapshot = { ...snapshot, status: 'selecting', current: { ...snapshot.current, ...selection } };
+  notify();
+  return Promise.resolve({ ok: true });
+};
+
+window.__ready = (async () => {
+  try {
+  const style = document.createElement('style');
+  style.textContent = "\n.esm-panel{box-sizing:border-box;width:100%;padding:16px 18px 18px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-elevation-prominent);user-select:none;-webkit-user-select:none;display:flex;flex-direction:column}\n.esm-title{display:flex;align-items:center;justify-content:center;min-height:20px;font-size:13px;font-weight:600;line-height:18px;color:var(--esm-hue)}\n.esm-modelRow{display:flex;justify-content:center;margin-top:2px;min-width:0}\n.esm-model{display:inline-flex;align-items:center;gap:3px;max-width:100%;padding:1px 6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;cursor:pointer;min-width:0}\n.esm-model:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}\n.esm-model:disabled{cursor:default}\n.esm-model:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--esm-hue))}\n.esm-modelName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.esm-modelChevron{flex:none;font-size:9px;line-height:1;opacity:.8}\n.esm-rail{position:relative;height:52px;margin-top:10px;cursor:pointer;touch-action:none}\n.esm-railTrack{position:absolute;left:14px;right:14px;top:50%;height:24px;margin-top:-12px}\n.esm-track{position:absolute;inset:0;border-radius:12px;background:var(--dsw-alias-border-l2)}\n.esm-fill{position:absolute;left:0;top:0;bottom:0;border-radius:12px;background:var(--esm-hue);overflow:hidden;transition:background .28s ease}\n/* 画布铺满**整条** rail（不放在 .esm-railTrack 里 —— 那是内缩后的容器，会把爆炸裁在 24px 的窄条里）。 */\n.esm-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}\n.esm-dot{position:absolute;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:rgba(255,255,255,.62);pointer-events:none;transition:opacity .28s ease}\n.esm-dot[data-active=\"true\"]{background:#fff}\n.esm-knob{position:absolute;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.05);transition:box-shadow .28s ease,transform .16s ease;pointer-events:none}\n.esm-panel[data-pressed=\"true\"] .esm-knob{transform:scale(1.08)}\n/* 按下时圆点的光晕扩散得更开，松开收回 —— 这是\"触感\"里最容易感知的一半。 */\n.esm-panel[data-pressed=\"true\"] .esm-knob{box-shadow:0 1px 5px rgba(0,0,0,.28),0 0 0 1px rgba(0,0,0,.05),0 0 22px 5px color-mix(in oklab, var(--esm-hue) 55%, transparent)}\n/* 圆点滑到 MAX 的那一下：先胀后收（配合 canvas 粒子爆炸 + 冲击环）。 */\n.esm-knob[data-punch=\"true\"]{animation:esm-punch .42s cubic-bezier(.3,1.4,.4,1)}\n@keyframes esm-punch{0%{transform:scale(1)}28%{transform:scale(1.34)}100%{transform:scale(1)}}\n/* 冲击环：从圆点向外扩散并淡出（只画环，不填实心）。 */\n/**\n * 冲击环：挂在**圆点内部**，用 left/top 50% + 负 margin 居中。\n * 这样\"与圆点同心\"是结构性保证 —— 不再依赖百分比基准、内缩量、坐标换算\n * （之前放在轨道容器里，环与圆点的坐标基准不同，实测偏了整整一条 rail 的宽度）。\n */\n.esm-ring{position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;border:2px solid var(--esm-hue);box-sizing:border-box;pointer-events:none;animation:esm-ring .5s cubic-bezier(.2,.9,.3,1) forwards}\n@keyframes esm-ring{0%{transform:scale(.55);opacity:.85}100%{transform:scale(2);opacity:0}}\n.esm-panel[data-spark=\"true\"] .esm-knob{box-shadow:0 1px 5px rgba(0,0,0,.3),0 0 0 1px rgba(0,0,0,.05),0 0 18px 3px color-mix(in oklab, var(--esm-hue) 58%, transparent)}\n.esm-rail:hover .esm-knob{box-shadow:0 1px 6px rgba(0,0,0,.34),0 0 0 1px rgba(0,0,0,.05)}\n.esm-rail:focus-visible{outline:none}\n.esm-rail:focus-visible .esm-knob{box-shadow:0 0 0 3px var(--dsw-focus-ring-color,var(--esm-hue))}\n.esm-msg{text-align:center;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);margin-top:10px}\n.esm-error{color:var(--dsw-alias-state-error-primary)}\n.esm-viewHead{display:flex;align-items:center;gap:6px;min-height:28px;flex:none}\n.esm-back{display:grid;place-items:center;width:26px;height:26px;margin-left:-6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font-size:15px;line-height:1;cursor:pointer;flex:none}\n.esm-back:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}\n.esm-back:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--esm-hue))}\n.esm-viewTitle{font-size:14px;font-weight:600;line-height:20px;color:var(--dsw-alias-label-primary)}\n.esm-modelList{max-height:min(46vh,340px);overflow-y:auto;margin:0 -4px;padding:0 4px}\n.esm-groupLabel{padding:8px 6px 3px;font-size:11px;line-height:15px;color:var(--dsw-alias-label-caption)}\n.esm-option{display:flex;align-items:center;gap:8px;width:100%;min-height:42px;padding:6px 8px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:18px;text-align:left;cursor:pointer}\n.esm-option:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}\n.esm-option[aria-selected=\"true\"]{background:var(--dsw-alias-interactive-bg-hover)}\n.esm-option:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}\n.esm-optionName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}\n.esm-optionMark{flex:none;width:14px;text-align:center;color:var(--esm-hue);font-size:12px}\n.esm-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;cursor:pointer}\n.esm-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}\n.esm-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}\n.esm-trigger:focus-visible{outline:none;box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--esm-hue))}\n.esm-triggerName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}\n/**\n * 档位文字**预留固定宽度**：各档名称长度不一（High / Max / Medium …），若让文字撑开宽度，\n * 每次换档整个控件都会伸缩，右侧的官方模型按钮跟着左右位移 —— 观感上就是\"字体位置在抖\"。\n * 这里按最长档名留位（默认容得下 6 个字符），文字在里面左对齐，控件宽度因而恒定。\n */\n.esm-triggerLevel{color:var(--esm-hue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none;min-width:var(--esm-level-w,0px);text-align:left}\n";
+  document.head.appendChild(style);
+
+  const source = await (await fetch('/lib/client.js')).text();
+  let registration = null;
+  window.__ModuleLoader__ = { load: (r) => { registration = r; } };
+  new Function('window', 'document', 'navigator', source)(window, document, navigator);
+  const mod = registration.factory((specifier) => {
+    if (specifier === 'react') return React;
+    if (specifier === 'react-dom/client') return ReactDOM;
+    throw new Error('unexpected require: ' + specifier);
+  });
+
+  // 走真入口：apply(ctx) 注册座位，再渲染座位组件（浮层/定位/高度过渡都是真的）
+  let seat = null;
+  mod.apply({
+    get: (name) => {
+      if (name === 'slots') return {
+        inject: (n, fn) => fn(),
+        register: (options, component) => { seat = { options, component }; return () => {}; }
+      };
+      if (name === 'modelDirectories') return {
+        directoryFor: () => ({ store: directory, load: () => Promise.resolve(), select })
+      };
+      if (name === 'sessions') return { list: { getSnapshot: () => ({ byId: { s: { id: 's', retainedBy: { mainView: 1 } } } }) } };
+      return undefined;
+    },
+    on: () => () => {},
+    effect: (fn) => { fn(); return () => {}; }
+  });
+  // 导出座位注入面，供测量脚本读取当前选择（provider/model/reasoningEffort）
+  window.__face = seat.options.inject('s');
+  ReactDOM.createRoot(document.getElementById('host')).render(React.createElement(seat.component, window.__face));
+  await new Promise((r) => setTimeout(r, 120));
+  return true;
+  } catch (error) {
+    window.__readyFailed = true;
+    window.__bootError = error && error.stack ? error.stack : String(error);
+    console.error('boot failed', window.__bootError);
+    return false;
+  }
+})();
+
+window.__q = {
+  trigger: () => document.querySelector('#host .esm-trigger'),
+  overlay: () => document.querySelector('[data-effort-host]'),
+  panel: () => document.querySelector('[data-effort-host]')?.querySelector('[data-effort-panel]') ?? null,
+  rail: () => window.__q.panel()?.querySelector('.esm-rail') ?? null,
+  knob: () => window.__q.panel()?.querySelector('div.esm-knob') ?? null,
+  canvas: () => window.__q.panel()?.querySelector('canvas.esm-canvas') ?? null
+};
+
+/** 打开浮层并回到干净状态（滑块页 + 非最高档）。 */
+window.__reset = async () => {
+  let panel = window.__q.panel();
+  if (panel !== null && panel.getAttribute('data-view') === 'model') {
+    panel.querySelector('.esm-back')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 420));
+  }
+  for (let i = 0; i < 5 && window.__q.overlay() === null; i++) {
+    window.__q.trigger()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  if (window.__q.panel() === null) return false;
+  window.__q.rail()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 700));
+  return true;
+};
+
+/** 补间写的进度值（0..1）——不受任何布局影响，是"位置动画"最可靠的读数。 */
+/**
+ * 圆点当前进度（0..1）—— 从它**可见的 left 样式**解析。
+ * 不再读 data-esm-pos：那个账本已经删掉（React 与补间双写会不同步）。
+ * 样式形如 calc(14px + 0.6667 * (100% - 28px))，取最后一个数字。
+ */
+/**
+ * 圆点当前进度（0..1）。
+ *
+ * 用**布局偏移**算（offsetLeft 相对 .esm-railTrack），不用 getBoundingClientRect：
+ * 面板做高度过渡/刚重建时 rect 会短暂是全 0 或异常值，实测因此得出 -0.067 的假读数。
+ * 也不再解析 style.left —— 浏览器会把 calc() 规范化成多种等价写法。
+ */
+window.__pos = () => {
+  const knob = window.__q.knob();
+  const panel = window.__q.panel();
+  if (knob === null || panel === null) return NaN;
+  const track = panel.querySelector('.esm-railTrack');
+  if (track === null) return NaN;
+  const width = track.offsetWidth;
+  if (!(width > 0)) return NaN;
+  const center = knob.offsetLeft + knob.offsetWidth / 2;
+  const inset = 14;
+  const ratio = (center - inset) / (width - inset * 2);
+  return ratio;
+};
+
+/** 圆点在画布坐标系里的中心（用布局偏移算，不受渐变/过渡影响）。 */
+window.__knobCenterInCanvas = () => {
+  const canvas = window.__q.canvas();
+  const knob = window.__q.knob();
+  const panel = window.__q.panel();
+  if (canvas === null || knob === null || panel === null) return null;
+  const track = panel.querySelector('.esm-railTrack');
+  if (track === null) return null;
+  const width = canvas.getBoundingClientRect().width;
+  if (!(width > 0)) return null;
+  // 圆点相对 .esm-railTrack 定位；该容器两端各内缩 14px，而画布铺满整条 rail，
+  // 所以画布内的中心 = 14 + 圆点容器内偏移。
+  const x = 14 + knob.offsetLeft + knob.offsetWidth / 2;
+  const y = canvas.getBoundingClientRect().height / 2;
+  return { x, y };
+};
+
+/** 控件稳定性：换档时宽度必须恒定（收起态只显示档位名）。 */
+window.__measureSeatStability = async () => {
+  try {
+    if (window.__q.overlay() !== null) {
+      window.__q.trigger()?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    const trigger = window.__q.trigger();
+    if (trigger === null) return "NO_TRIGGER";
+    const sibling = document.createElement('span');
+    sibling.textContent = 'M';
+    sibling.style.cssText = 'display:inline-block;margin-left:8px';
+    trigger.parentElement.appendChild(sibling);
+    const read = () => ({
+      trigger: +trigger.getBoundingClientRect().width.toFixed(1),
+      sibling: +sibling.getBoundingClientRect().left.toFixed(1),
+      text: trigger.textContent.trim(),
+      panelOpen: window.__q.overlay() !== null
+    });
+    const samples = [read()];
+    const face = window.__face;
+    for (const next of ['max', 'low', 'high']) {
+      const current = face?.directory?.getSnapshot?.().current ?? null;
+      if (face && typeof face.select === 'function' && current !== null) {
+        face.select({ provider: current.provider, model: current.model, reasoningEffort: next });
+      }
+      await new Promise((r) => setTimeout(r, 260));
+      samples.push(read());
+    }
+    sibling.remove();
+    return { samples };
+  } catch (error) {
+    return "JSERR: " + (error && error.stack ? error.stack : String(error));
+  }
+};
+
+/** 切模型后，滑块位置必须仍与档位一致（不能跑到最左）。 */
+window.__measureModelSwitch = async () => {
+  try {
+    if (!(await window.__reset())) return "NO_OVERLAY";
+    const panel = window.__q.panel();
+    const snap = () => window.__face.directory.getSnapshot().current ?? null;
+    // 先设到 High（四档的 index 2 → 进度 2/3）
+    window.__q.rail().dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
+    window.__q.rail().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700));
+    const before = { pos: window.__pos(), effort: snap()?.reasoningEffort ?? null };
+
+    panel.querySelector('.esm-model').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    const options = [...panel.querySelectorAll('.esm-option')];
+    if (options.length < 2) return "NO_OPTION";
+    options[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const trace = [];
+    for (let i = 0; i < 14; i++) {
+      await new Promise((r) => setTimeout(r, 70));
+      trace.push(window.__pos());
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    const after = { pos: window.__pos(), effort: snap()?.reasoningEffort ?? null, model: snap()?.model ?? null };
+    return { before, after, trace };
+  } catch (error) {
+    return "JSERR: " + (error && error.stack ? error.stack : String(error));
+  }
+};
+
+/** 拖动：跨档移动指针，采样位置推进。 */
+window.__measureDrag = async () => {
+  try {
+    if (!(await window.__reset())) return "NO_OVERLAY";
+    const rail = window.__q.rail();
+    const box = rail.getBoundingClientRect();
+    const fire = (type, x) => rail.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: box.top + box.height / 2, pointerId: 31 }));
+    const samples = [];
+    fire('pointerdown', box.left + 2);
+    for (const ratio of [0.3, 0.55, 0.8, 1]) {
+      fire('pointermove', box.left + Math.max(0, box.width * ratio - 14));
+      await new Promise((r) => setTimeout(r, 120));
+      samples.push(window.__pos());
+    }
+    fire('pointerup', box.right);
+    await new Promise((r) => setTimeout(r, 700));
+    return { samples, final: window.__pos() };
+  } catch (error) {
+    return "JSERR: " + (error && error.stack ? error.stack : String(error));
+  }
+};
+
+/** 视图切换：框只变高，宽度/左缘不变。 */
+window.__measureMorph = async () => {
+  try {
+    if (!(await window.__reset())) return "NO_OVERLAY";
+    const box = () => {
+      const rect = window.__q.overlay().getBoundingClientRect();
+      return { w: +rect.width.toFixed(1), left: +rect.left.toFixed(1), h: +rect.height.toFixed(1), view: window.__q.panel().getAttribute('data-view') };
+    };
+    const slider = box();
+    window.__q.panel().querySelector('.esm-model').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const heights = [];
+    for (let i = 0; i < 8; i++) { await new Promise((r) => setTimeout(r, 45)); heights.push(box().h); }
+    const model = box();
+    window.__q.panel().querySelector('.esm-back').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 45));
+    return { slider, model, heights, back: box() };
+  } catch (error) {
+    return "JSERR: " + (error && error.stack ? error.stack : String(error));
+  }
+};
+
+/** 到 MAX 的爆炸：墨量、起爆点、冲击环几何。 */
+window.__measureBurst = async () => {
+  try {
+    if (!(await window.__reset())) return "NO_OVERLAY";
+    const low = window.__ink();
+    window.__q.rail().dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    const frames = [];
+    let ringSeen = false, punchSeen = false, ringCenter = null;
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 40));
+      const frame = window.__ink();
+      frames.push({ t: (i + 1) * 40, ink: frame.ink, cx: frame.cx, cy: frame.cy, minX: frame.minX, maxX: frame.maxX, minY: frame.minY, maxY: frame.maxY });
+      if (i < 3) {
+        const ring = window.__q.panel().querySelector('.esm-ring');
+        ringSeen = ringSeen || ring !== null;
+        punchSeen = punchSeen || window.__q.knob()?.getAttribute('data-punch') === 'true';
+        if (ring !== null && ringCenter === null) {
+          const knob = window.__q.knob();
+          void ring.offsetHeight;
+          void knob.offsetHeight;
+          const rr = ring.getBoundingClientRect();
+          const kr = knob.getBoundingClientRect();
+          ringCenter = { dx: (rr.left + rr.width / 2) - (kr.left + kr.width / 2), dy: (rr.top + rr.height / 2) - (kr.top + kr.height / 2) };
+        }
+      }
+    }
+    await new Promise((r) => setTimeout(r, 900));
+    const originRaw = window.__q.canvas()?.dataset.burstOrigin ?? null;
+    const origin = originRaw === null ? null : (() => { const [x, y] = originRaw.split(',').map(Number); return { x, y }; })();
+    return { low, frames, settled: window.__ink().ink, ringSeen, punchSeen, ringCenter, origin, knobCenter: window.__knobCenterInCanvas() };
+  } catch (error) {
+    return "JSERR: " + (error && error.stack ? error.stack : String(error));
+  }
+};
+
+/** 手感：按下触感、拖动落位、按压态泄漏。 */
+window.__measureHandfeel = async () => {
+  try {
+    if (!(await window.__reset())) return "NO_OVERLAY";
+    const panel = window.__q.panel();
+    const rail = window.__q.rail();
+    const track = panel.querySelector('.esm-railTrack');
+    const box = track.getBoundingClientRect();
+    const fire = (type, x) => rail.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: box.top + box.height / 2, pointerId: 41 }));
+    const trackWidth = box.width;
+    const inset = 14;
+    const at = (ratio) => box.left + inset + (trackWidth - inset * 2) * ratio;
+    const out = {};
+    out.knobWidthIdle = +window.__q.knob().getBoundingClientRect().width.toFixed(1);
+    fire('pointerdown', at(0.5));
+    await new Promise((r) => setTimeout(r, 80));
+    out.pressedAttr = panel.getAttribute('data-pressed');
+    out.knobWidthWhenPressed = +window.__q.knob().getBoundingClientRect().width.toFixed(1);
+    // 松手后应落在最近刻度（在 0.75 处松手 → 最近刻度 0.667）
+    fire('pointermove', at(0.75));
+    await new Promise((r) => setTimeout(r, 600));
+    out.posBeforeUp = window.__pos();
+    fire('pointerup', at(0.75));
+    const settle = [];
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      settle.push(window.__pos());
+    }
+    out.settleSamples = settle;
+    out.pressedAfterUp = panel.getAttribute('data-pressed');
+    await new Promise((r) => setTimeout(r, 400));
+    out.final = window.__pos();
+    // 在轨道之外松开也必须复位按压态
+    fire('pointerdown', at(0.4));
+    await new Promise((r) => setTimeout(r, 60));
+    out.pressedBeforeOutsideUp = panel.getAttribute('data-pressed');
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 5, clientY: 5, pointerId: 41 }));
+    await new Promise((r) => setTimeout(r, 60));
+    out.pressedAfterOutsideUp = panel.getAttribute('data-pressed');
+    return out;
+  } catch (error) {
+    return "JSERR: " + (error && error.stack ? error.stack : String(error));
+  }
+};
+
+/** 画布墨量 / 重心 / 包围盒（CSS 像素）。 */
+window.__ink = () => {
+  const canvas = window.__q.canvas();
+  if (canvas === null) return { ink: 0, cx: null, cy: null, minX: null, maxX: null, minY: null, maxY: null };
+  const context = canvas.getContext('2d');
+  const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const dpr = canvas.width / canvas.getBoundingClientRect().width;
+  let ink = 0, sx = 0, sy = 0, minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      if (data[(y * canvas.width + x) * 4 + 3] <= 40) continue;
+      const px = x / dpr, py = y / dpr;
+      ink++; sx += px; sy += py;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+  }
+  return ink === 0
+    ? { ink: 0, cx: null, cy: null, minX: null, maxX: null, minY: null, maxY: null }
+    : { ink, cx: sx / ink, cy: sy / ink, minX, maxX, minY, maxY };
+};
+
+/**
+ * 圆点中心在**画布坐标系**里的位置。
+ *
+ * 圆点用 calc(inset + (100% - 2*inset) * percent) 定位（与档位点、
+ * 爆炸起点同一套坐标系），这里**直接解析圆点当前的 inline left**，把它换算成相对
+ * 轨道容器的像素位置 —— 不假设公式，样式改了这里自动跟着对。
+ */
+window.__knobCenterInCanvas = () => {
+  const canvas = window.__q.canvas();
+  const knob = window.__q.knob();
+  const panel = window.__q.panel();
+  if (canvas === null || knob === null || panel === null) return null;
+  const track = panel.querySelector('.esm-railTrack');
+  if (track === null) return null;
+  // 同一帧内读两个 rect：读前先强制刷新布局，避免拿到陈旧坐标（踩过）。
+  void track.offsetHeight;
+  void canvas.offsetHeight;
+  void knob.offsetHeight;
+  const canvasRect = canvas.getBoundingClientRect();
+  const railRect = panel.querySelector('.esm-rail').getBoundingClientRect();
+  const knobRect = knob.getBoundingClientRect();
+  const dpr = canvas.width / Math.max(1, canvasRect.width);
+  // 圆点的百分比相对整条 rail 解析，而画布也铺满整条 rail —— 两者同一坐标系。
+  const x = knobRect.left + knobRect.width / 2 - railRect.left;
+  const y = canvasRect.height / 2;
+  // 健全性检查：中心应落在画布范围内（圆点按弧心定位，两端各内缩 14px，
+  // 所以允许一点余量）；明显越界说明读到了不一致的几何，宁可判为不可测。
+  if (!(x >= -20 && x <= canvasRect.width + 20)) {
+    window.__knobCenterWhy = JSON.stringify({ x, trackLeft: trackRect.left, canvasLeft: canvasRect.left, canvasWidth: canvasRect.width, knobLeft: knobRect.left, knobWidth: knobRect.width });
+    return null;
+  }
+  return { x: +x.toFixed(2), y: +y.toFixed(2), dpr };
+};
+</script></body></html>
